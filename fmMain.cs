@@ -10,10 +10,9 @@ using System.ServiceProcess;
 using System.ComponentModel;
 using Print_Manager.Properties;
 using System.Threading.Tasks;
-using System.Runtime.InteropServices;
-using System.Drawing.Imaging;
 using System.Reflection;
 using System.Security.Principal;
+using System.Linq;
 
 namespace Print_Manager
 {
@@ -29,94 +28,6 @@ namespace Print_Manager
         private PrintServer printServer;
         private ToolTip toolTip;
 
-        #region FastGIF
-        [DllImport("kernel32.dll")]
-        static extern bool CreateTimerQueueTimer(out IntPtr phNewTimer,
-        IntPtr TimerQueue, WaitOrTimerDelegate Callback, IntPtr Parameter,
-        uint DueTime, uint Period, uint Flags);
-        [DllImport("kernel32.dll")]
-        static extern bool ChangeTimerQueueTimer(IntPtr TimerQueue, IntPtr Timer,
-            uint DueTime, uint Period);
-        [DllImport("kernel32.dll")]
-        static extern bool DeleteTimerQueueTimer(IntPtr TimerQueue,
-            IntPtr Timer, IntPtr CompletionEvent);
-        public delegate void WaitOrTimerDelegate(IntPtr lpParameter,
-            bool TimerOrWaitFired);
-
-        public static WaitOrTimerDelegate UpdateFn;
-
-        public enum ExecuteFlags
-        {
-            WT_EXECUTEINIOTHREAD = 0x00000001,
-        };
-
-        private Image gif;
-        private int frameCount = -1;
-        private uint[] frameIntervals;
-        private int currentFrame = 0;
-        private static object locker = new object();
-        private IntPtr timerPtr;
-
-        private void InitializeFastGIF()
-        {
-            SetStyle(ControlStyles.AllPaintingInWmPaint |
-            ControlStyles.OptimizedDoubleBuffer, true);
-            UpdateFn = new WaitOrTimerDelegate(UpdateFrame);
-        }
-
-        private void AnimateFastGIF(Image image)
-        {
-            gif = image;
-            frameCount = gif.GetFrameCount(FrameDimension.Time);
-            PropertyItem propItem = gif.GetPropertyItem(20736);
-            int propIndex = 0;
-            frameIntervals = new uint[frameCount];
-            for (int i = 0; i < frameCount; i++)
-            {
-                frameIntervals[i] = BitConverter.ToUInt32(propItem.Value,
-                    propIndex) * 10;
-                propIndex += 4;
-            }
-
-            ShowFrame();
-            CreateTimerQueueTimer(out timerPtr, IntPtr.Zero, UpdateFn,
-                IntPtr.Zero, frameIntervals[0], 100000,
-                (uint)ExecuteFlags.WT_EXECUTEINIOTHREAD);
-        }
-
-        private void UpdateFrame(IntPtr lpParam, bool timerOrWaitFired)
-        {
-            currentFrame = (currentFrame + 1) % frameCount;
-            ShowFrame();
-            ChangeTimerQueueTimer(IntPtr.Zero, timerPtr,
-                frameIntervals[currentFrame], 100000);
-        }
-
-        private void ShowFrame()
-        {
-            lock (locker)
-            {
-                gif.SelectActiveFrame(FrameDimension.Time, currentFrame);
-            }
-            pFastGif.Invalidate();
-        }
-
-        private void pFastGif_Paint(object sender, PaintEventArgs e)
-        {
-            base.OnPaint(e);
-
-            lock (locker)
-            {
-                e.Graphics.DrawImage(gif, pFastGif.ClientRectangle);
-            }
-        }
-
-        private void ClearFastGIFTimer()
-        {
-            DeleteTimerQueueTimer(IntPtr.Zero, timerPtr, IntPtr.Zero);
-        }
-        #endregion
-
         private bool IsRunAsAdministrator()
         {
             WindowsIdentity windowsIdentity = WindowsIdentity.GetCurrent();
@@ -128,7 +39,6 @@ namespace Print_Manager
         public fmMain()
         {
             InitializeComponent();
-            InitializeFastGIF();
 
             dataGridView1.Columns["isDefaultPrinter"].DefaultCellStyle.NullValue = null;
             dataGridView1.Columns["isNetworkPrinter"].DefaultCellStyle.NullValue = null;
@@ -165,7 +75,7 @@ namespace Print_Manager
             {
                 PrintUI("dl", printerName);
                 string printerShortName = GetPrinterShortName(printerName);
-                Notification($"Принтер {printerName} удален", Color.Red);
+                Notification($"Принтер {printerName} удален", Color.Green);
             }
             catch
             {
@@ -244,23 +154,24 @@ namespace Print_Manager
 
             if (isShowing)
             {
+                apbGif.StartAnimation();
                 if (isError)
                 {
                     isLoading = false;
-                    AnimateFastGIF(Resources.error);
+                    apbGif.Image = Resources.error;
                     lblLoaderMsg.Text = "Ошибка сервера печати";
                     btnLoader.Visible = true;
                 }
                 else
                 {
-                    AnimateFastGIF(Resources.loading);
+                    apbGif.Image = Resources.loading;
                     lblLoaderMsg.Text = "Обновление";
                     btnLoader.Visible = false;
                 }
             }
             else
             {
-                ClearFastGIFTimer();
+                apbGif.StopAnimation();
             }
 
             pInfo.Visible = isShowing;
@@ -277,12 +188,13 @@ namespace Print_Manager
 
                 await Task.Run(() =>
                 {
-                    ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT * FROM Win32_Printer");
+                    ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT Name, WorkOffline FROM Win32_Printer");
+                    ManagementObjectCollection searchers = searcher.Get();
                     PrintServer newPrintServer = new PrintServer();
                     PrintQueueCollection printQueues = newPrintServer.GetPrintQueues();
                     Invoke((MethodInvoker)(() => printServer = newPrintServer));
 
-                    foreach (ManagementObject win32_printer in searcher.Get())
+                    foreach (ManagementObject win32_printer in searchers.Cast<ManagementObject>())
                     {
                         string printerFullName = win32_printer["Name"].ToString();
                         bool isOffline = (bool)win32_printer["WorkOffline"];
@@ -425,7 +337,7 @@ namespace Print_Manager
                 }
                 catch
                 {
-                    Notification($"Не удалось установить {selectedPrinterShortName} по умолчанию", Color.Green);
+                    Notification($"Не удалось установить {selectedPrinterShortName} по умолчанию", Color.Red);
                 }
             }
         }
@@ -714,11 +626,6 @@ namespace Print_Manager
                 rename.ShowDialog();
                 LoadPrintersToDVG();
             }
-        }
-
-        private void fmMain_FormClosing(object sender, FormClosingEventArgs e)
-        {
-            if (isLoading) ClearFastGIFTimer();
         }
 
         private void dataGridView1_CellMouseEnter(object sender, DataGridViewCellEventArgs e)

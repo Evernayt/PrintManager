@@ -165,7 +165,7 @@ namespace Print_Manager
             this.Font = new System.Drawing.Font("Segoe UI", 9F);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(4);
-            this.MinimumSize = new System.Drawing.Size(1183, 738);
+            this.MinimumSize = new System.Drawing.Size(1190, 755);
             this.Name = "fmFilterSettings";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Настройка фильтров";
